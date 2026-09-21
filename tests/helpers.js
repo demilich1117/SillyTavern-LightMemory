@@ -39,6 +39,7 @@ export function fakeHost(records = recordsFor(30), overrides = {}) {
             return response({ spans: [{ index: source - 1 }] });
         } }),
         switchChat: () => { owner = 'chat-B'; signature = 'changed'; local = null; remote = null; },
+        append: more => { records.push(...more); signature = fingerprint(records.map(r => r.rawHash)); },
         edit: index => { signature = 'edited'; records[index].text += '编辑'; records[index].rawHash = fingerprint(records[index].text); records[index].cleanHash = fingerprint(records[index].text); },
         get local() { return local; }, get remote() { return remote; },
     };

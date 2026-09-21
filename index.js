@@ -7,12 +7,15 @@ import { mountUI } from './src/ui.js';
 let instance = null;
 let starting = null;
 let disposers = [];
+let disabled = false;
 
 export async function initialize() {
+    if (disabled) return null;
     if (instance) return instance;
     if (starting) return starting;
     starting = (async () => {
         const host = await createHost();
+        if (disabled) return null;
         const engine = new MemoryEngine(host, createVectorService(host));
         const ui = mountUI(host, engine);
         const { eventSource, eventTypes: e } = host.context();
@@ -22,9 +25,9 @@ export async function initialize() {
             disposers.push(() => eventSource.removeListener(event, handler));
         }
         on(e.CHAT_CHANGED, () => { engine.changed(); engine.schedule(); });
-        on(e.GENERATION_STARTED, (_type, _options, dryRun) => { if (!dryRun) engine.cancel('正在生成角色回复。'); });
-        on(e.GENERATION_ENDED, () => { engine.scheduleRefresh(); engine.schedule(); });
-        on(e.GENERATION_STOPPED, () => { engine.cancel('角色生成已停止。'); engine.scheduleRefresh(); });
+        on(e.GENERATION_STARTED, (_type, _options, dryRun) => { if (!dryRun) engine.generationStarted(); });
+        on(e.GENERATION_ENDED, () => engine.generationEnded());
+        on(e.GENERATION_STOPPED, () => engine.generationEnded());
         for (const name of ['MESSAGE_EDITED', 'MESSAGE_UPDATED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED', 'MESSAGE_SWIPE_DELETED', 'CHARACTER_FIRST_MESSAGE_SELECTED']) {
             on(e[name], () => { engine.changed(); engine.schedule(); });
         }
@@ -43,6 +46,7 @@ export async function initialize() {
 }
 
 export async function onDisable() {
+    disabled = true;
     instance?.engine.destroy();
     instance?.ui.destroy();
     for (const dispose of disposers) dispose();
@@ -52,7 +56,7 @@ export async function onDisable() {
     globalThis.SillyTavern?.getContext()?.setExtensionPrompt(MODULE, '', 1, 1, false, 0);
 }
 
-export async function onEnable() { await initialize(); }
+export async function onEnable() { disabled = false; await initialize(); }
 
 // APP_READY may already have fired for an installation loaded without a full page reload.
 const ctx = globalThis.SillyTavern.getContext();

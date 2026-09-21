@@ -132,6 +132,7 @@ export async function createHost() {
         assertSnapshot(snapshot);
         const remote = await remoteState(snapshot, signal);
         assertSnapshot(snapshot);
+        if (script.isGenerating()) throw new DOMException('角色正在回复，未写入本批记忆。', 'AbortError');
         if ((remote?.revision ?? null) !== (expectedRevision ?? null)) throw new Error('聊天记忆已在其他窗口更新，请重新加载聊天后再整理。');
         const ctx = context();
         const old = ctx.chatMetadata[MODULE];

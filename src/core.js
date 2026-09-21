@@ -1,7 +1,7 @@
 export const MODULE = 'lightmemory';
 export const VERSION = 1;
 export const DEFAULTS = Object.freeze({
-    schemaVersion: VERSION, enabled: false, auto: true,
+    schemaVersion: VERSION, enabled: false, auto: true, floatingEnabled: true, backgroundDuringChat: true,
     recentTokens: 12000, minRounds: 4, triggerTokens: 4000, triggerRounds: 8,
     batchTarget: 4000, batchMax: 6000, memoryTokens: 2000, recallLimit: 6,
     apiMode: 'main', customUrl: '', customModel: '', secretId: '',
@@ -28,7 +28,7 @@ export function normalizeSettings(input = {}) {
     }
     out.batchTarget = Math.min(out.batchTarget, out.batchMax);
     out.summaryOutput = Math.min(out.summaryOutput, Math.floor(out.summaryContext / 2));
-    for (const key of ['enabled', 'auto']) out[key] = typeof out[key] === 'boolean' ? out[key] : DEFAULTS[key];
+    for (const key of ['enabled', 'auto', 'floatingEnabled', 'backgroundDuringChat']) out[key] = typeof out[key] === 'boolean' ? out[key] : DEFAULTS[key];
     for (const key of ['customUrl', 'customModel', 'secretId', 'vectorModel', 'vectorUrl']) out[key] = String(out[key] ?? '').trim();
     for (const [key, values] of Object.entries({ apiMode: ['main', 'custom'], recallMode: ['keyword', 'semantic'], vectorSource: ['transformers', 'openai', 'siliconflow', 'ollama'], siliconflowEndpoint: ['cn', 'com'] })) {
         if (!values.includes(out[key])) out[key] = DEFAULTS[key];

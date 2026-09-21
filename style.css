@@ -61,3 +61,20 @@
     .lightmemory .lm-actions .lm-button { flex: 1 1 calc(50% - 8px); }
 }
 @media (prefers-reduced-motion: reduce) { .lightmemory .lm-button:active { transform: none; } }
+
+.lightmemory.lm-floating { position: fixed; z-index: 3010; width: 320px; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow: auto; background: var(--lm-paper); backdrop-filter: blur(16px); border: 1px solid var(--lm-rule); border-radius: 12px; }
+.lightmemory.lm-floating.lm-collapsed { width: 224px; overflow: hidden; }
+.lightmemory .lm-float-header { display: flex; align-items: center; gap: 8px; padding: 4px 8px; }
+.lightmemory .lm-float-handle { border: 0; background: transparent; color: var(--lm-ink); font: inherit; font-weight: 600; padding: 8px; min-height: 40px; cursor: grab; touch-action: none; white-space: nowrap; }
+.lightmemory .lm-float-handle:active { cursor: grabbing; }
+.lightmemory .lm-float-phase { flex: 1; font-size: 12px; color: var(--lm-muted); white-space: nowrap; }
+.lightmemory .lm-float-toggle { margin: 0; padding: 4px 8px; }
+.lightmemory .lm-float-body { padding: 0 16px 16px; border-top: 1px solid var(--lm-rule); }
+.lightmemory .lm-float-message { margin: 16px 0 4px; font-weight: 600; }
+.lightmemory .lm-float-body > .lm-metrics { margin-top: 16px; }
+.lightmemory .lm-float-body > .lm-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.lightmemory .lm-float-body .lm-button { width: 100%; min-width: 0; padding: 8px; }
+.lightmemory .lm-float-body > .lm-notice { max-height: 120px; overflow-y: auto; }
+.lightmemory.lm-floating[data-phase="summarizing"] .lm-float-phase,
+.lightmemory.lm-floating[data-phase="saving"] .lm-float-phase { color: var(--lm-accent); }
+.lightmemory.lm-floating[data-phase="error"] .lm-float-phase { color: var(--SmartThemeEmColor, #cc8e86); }

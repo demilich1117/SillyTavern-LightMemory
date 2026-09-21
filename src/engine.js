@@ -13,6 +13,7 @@ export class MemoryEngine {
         this.job = null;
         this.timer = null;
         this.serial = 0;
+        this.idleWaiters = new Set();
         this.status = { phase: 'idle', message: '打开聊天后启用轻忆。', error: '', warning: '', trace: null, metrics: null, snapshot: null, state: null };
     }
 
@@ -27,10 +28,44 @@ export class MemoryEngine {
         this.serial++;
         this.controller?.abort(new DOMException(message, 'AbortError'));
         this.host.inject('');
+        if (this.job) this.emit({ phase: 'paused', message });
+    }
+    generationStarted() {
+        if (!this.host.settings().backgroundDuringChat) this.cancel('正在生成角色回复，暂停后台整理。');
+        else { this.serial++; this.host.inject(''); }
+        this.emit({});
+    }
+    generationEnded() {
+        this.emit({});
+        for (const check of this.idleWaiters) check();
+        if (!this.job) { this.scheduleRefresh(); this.schedule(); }
+    }
+    stopBackground(message = '已停止本次后台整理；自动整理仍按开关执行。') {
+        clearTimeout(this.timer);
+        this.controller?.abort(new DOMException(message, 'AbortError'));
+        // A foreground prompt may already have dropped covered messages. Keep its injection.
+        this.emit({ phase: 'paused', message });
+    }
+    async waitForIdle(signal) {
+        signal.throwIfAborted();
+        if (!this.host.isGenerating()) return;
+        this.emit({ phase: 'waiting', message: '摘要任务等待角色回复结束后核对并保存；聊天继续正常使用已确认的记忆。' });
+        await new Promise((resolve, reject) => {
+            let interval, timeout;
+            const clean = () => { clearInterval(interval); clearTimeout(timeout); this.idleWaiters.delete(check); signal.removeEventListener('abort', abort); };
+            const check = () => { if (!this.host.isGenerating()) { clean(); resolve(); } };
+            const abort = () => { clean(); reject(signal.reason); };
+            this.idleWaiters.add(check); signal.addEventListener('abort', abort, { once: true });
+            // ST can emit per-character completion before the group-generation flag resets.
+            // Events are primary; bounded polling covers that missing whole-group-idle event.
+            interval = setInterval(check, 250);
+            timeout = setTimeout(() => { clean(); reject(new Error('等待聊天空闲超过 10 分钟，已停止任务并保留原文。')); }, 600000);
+            if (signal.aborted) abort(); else check();
+        });
     }
     changed() {
         this.cancel('聊天或配置上下文已改变。');
-        this.emit({ trace: null, metrics: null, snapshot: null, state: null, error: '', warning: '' });
+        this.emit({ trace: null, metrics: null, snapshot: null, state: null, error: '', warning: '', startedAt: null, completedBatches: 0, phase: 'idle' });
         this.scheduleRefresh();
     }
     scheduleRefresh() {
@@ -103,7 +138,7 @@ export class MemoryEngine {
     async intercept(coreChat, maxPrompt, type) {
         this.host.inject('');
         if (!this.host.settings().enabled || ![undefined, '', 'normal', 'swipe', 'regenerate', 'continue'].includes(type)) return;
-        this.controller?.abort(new DOMException('正在生成回复，暂停后台整理。', 'AbortError'));
+        if (!this.host.settings().backgroundDuringChat) this.controller?.abort(new DOMException('正在生成回复，暂停后台整理。', 'AbortError'));
         const serial = ++this.serial;
         try {
             const data = await this.inspect(coreChat, type, maxPrompt);
@@ -162,6 +197,7 @@ export class MemoryEngine {
         const execute = async () => {
             try { await this.process(force, controller.signal); }
             catch (error) {
+                if (this.host.identity() !== owner) return;
                 if (error?.name === 'AbortError') this.emit({ phase: 'paused', message: '后台任务已停止，已保存的记忆仍然有效。' });
                 else this.fail(error);
             } finally { if (this.controller === controller) this.controller = null; }
@@ -175,13 +211,13 @@ export class MemoryEngine {
     }
 
     async process(force, signal) {
-        this.emit({ error: '', phase: 'preparing', message: '正在核对正文、来源和预算…' });
+        this.emit({ error: '', phase: 'preparing', message: '正在核对正文、来源和预算…', startedAt: Date.now(), completedBatches: 0 });
         let batches = 0;
         let last = null;
         while (true) {
             signal.throwIfAborted();
-            if (this.host.isGenerating()) throw new DOMException('角色开始生成。', 'AbortError');
-            const data = await this.inspect();
+            await this.waitForIdle(signal);
+            let data = await this.inspect();
             if (!data.settings.enabled || (!force && (!data.settings.auto || data.state.paused))) break;
             this.publish(data);
             await this.confirm(data.snapshot, signal);
@@ -204,12 +240,25 @@ export class MemoryEngine {
                 metrics: { ...data.metrics, batchMax: effectiveMax, batchTokens: batch.tokens, tokenizerEstimated: api.tokenizerEstimated } });
             const raw = await boundedRequest(s => api.send(messages, s), { seconds: data.settings.requestTimeout, retries: 1, signal });
             signal.throwIfAborted();
-            this.host.assertSnapshot(data.snapshot);
             const segment = parseSummary(raw, batch);
+            await this.waitForIdle(signal);
+            const fresh = await this.inspect();
+            signal.throwIfAborted();
+            // Appended turns are allowed. Existing memory and every source used by this batch
+            // must still match, including regex depth effects and selected swipes.
+            const current = new Map(fresh.snapshot.records.map(r => [r.index, r]));
+            if (fresh.snapshot.owner !== data.snapshot.owner || !fresh.settings.enabled ||
+                fingerprint(fresh.snapshot.state) !== fingerprint(data.snapshot.state) || fresh.reconciled.changed ||
+                batch.spans.some(span => { const r = current.get(span.index); return !r || r.rawHash !== span.rawHash || r.cleanHash !== span.cleanHash || r.protected; })) {
+                throw new Error('摘要期间来源、清理结果或记忆已改变；本批结果已丢弃，原文继续保留。');
+            }
+            if (this.host.isGenerating()) throw new DOMException('核对时开始新的角色回复，未保存本批。', 'AbortError');
+            data = fresh;
             const next = { ...data.state, segments: [...data.state.segments, segment] };
             this.emit({ phase: 'saving', message: '正在保存并读回确认…' });
             await this.save(data, next, signal);
             batches++;
+            this.emit({ completedBatches: batches });
             // Yield between completed transactions, allowing edits, generation and pause to take priority.
             await new Promise(resolve => setTimeout(resolve, 0));
         }
@@ -224,8 +273,8 @@ export class MemoryEngine {
                 this.emit({ warning: '记忆已保存；向量索引暂未完成，关键词召回仍可用。' });
             }
         }
-        this.emit({ phase: 'idle', message: batches ? `已完成 ${batches} 批整理。` : '待整理内容尚未达到条件，近期正文继续保留。' });
         await this.refresh();
+        this.emit({ phase: 'idle', message: batches ? `已完成 ${batches} 批整理。` : '待整理内容尚未达到条件，近期正文继续保留。' });
     }
 
     async editState(transform) {

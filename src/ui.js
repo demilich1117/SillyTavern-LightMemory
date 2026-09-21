@@ -1,4 +1,5 @@
 import { MODULE, DEFAULTS, normalizeSettings, segmentText } from './core.js';
+import { mountFloatingPanel } from './floating.js';
 
 // Design brief: an RP reader glances here between replies. The focal point is the history ribbon:
 // remembered / waiting / recent, followed by a short status sentence. Use ST's paper/ink/muted
@@ -70,6 +71,9 @@ export function mountUI(host, engine) {
     }
     const switches = el('div', { class: 'lm-switches' }); content.append(switches);
     check('enabled', '启用轻忆', switches); check('auto', '自动整理', switches);
+    check('floatingEnabled', '显示悬浮条', switches);
+    check('backgroundDuringChat', '聊天时继续后台摘要', switches);
+    content.append(el('p', { class: 'lm-help' }, '后台摘要与聊天可同时请求 API；摘要完成后等回复结束再核对保存。同一聊天仍逐批整理，避免概览断层。'));
 
     function section(title, open = false) {
         const node = el('details', { class: 'lm-section', open });
@@ -172,7 +176,7 @@ export function mountUI(host, engine) {
         if (await confirm('这会清除轻忆生成的记忆及手动修改，再从清理后的正文整理。聊天原文不变；建议先导出记忆。')) await engine.rebuild();
     }, backups);
 
-    content.append(el('p', { class: 'lm-footer' }, '轻忆 0.1.1 · 原文保留，记忆可追溯'));
+    content.append(el('p', { class: 'lm-footer' }, '轻忆 0.2.0 · 原文保留，记忆可追溯'));
 
     async function confirm(text) {
         const ctx = host.context();
@@ -221,6 +225,7 @@ export function mountUI(host, engine) {
         }
         custom.hidden = settings.apiMode !== 'custom';
         semantic.hidden = settings.recallMode !== 'semantic';
+        floating.sync();
     }
     function save() {
         const settings = { ...host.settings() };
@@ -255,7 +260,18 @@ export function mountUI(host, engine) {
         waiting.style.flex = String(pending); recent.style.flex = String(latest || 1);
         ribbon.setAttribute('aria-label', m ? `近期 ${latest} 轮，待整理 ${pending} 轮，已有 ${m.segments} 批记忆` : '尚未读取聊天');
     });
+    const floating = mountFloatingPanel(host, engine, {
+        memories: () => showMemories(),
+        injection: () => showText('上次注入', engine.status.trace?.text || '尚无记忆注入。'),
+        settings: () => {
+            const hostDrawer = root.closest('.drawer-content');
+            if (hostDrawer && !hostDrawer.classList.contains('openDrawer')) hostDrawer.parentElement.querySelector('.drawer-toggle')?.click();
+            if (getComputedStyle(content).display === 'none') toggle.click();
+            root.scrollIntoView({ block: 'start' });
+        },
+        hide: () => { host.saveSettings({ ...host.settings(), floatingEnabled: false }); syncControls(); },
+    });
     syncControls();
     refreshSecrets().catch(() => {});
-    return { root, syncControls, destroy: () => { unsubscribe(); root.remove(); } };
+    return { root, syncControls, destroy: () => { unsubscribe(); floating.destroy(); root.remove(); } };
 }
