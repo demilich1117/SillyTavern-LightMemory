@@ -1,3 +1,4 @@
+import { mvuEvidence } from './mvu.js';
 import { parseLedger, replayLedger, formatLedger, validateSavedLedger, ledgerLines, invalidLedgerIndex } from './ledger.js';
 export const MODULE = 'lightmemory';
 export const VERSION = 2;
@@ -9,7 +10,7 @@ export const DEFAULTS = Object.freeze({
     summaryContext: 16384, summaryOutput: 4096, requestTimeout: 90,
     recallMode: 'keyword', vectorSource: 'transformers', vectorModel: '',
     vectorUrl: '', siliconflowEndpoint: 'cn', vectorTimeout: 5,
-    vectorChunkTokens: 256,
+    vectorChunkTokens: 256, mvuEnabled: false, mvuTimePath: '', mvuLocationPath: '',
 });
 
 const LIMITS = {
@@ -29,8 +30,8 @@ export function normalizeSettings(input = {}) {
     }
     out.batchTarget = Math.min(out.batchTarget, out.batchMax);
     out.summaryOutput = Math.min(out.summaryOutput, Math.floor(out.summaryContext / 2));
-    for (const key of ['enabled', 'auto', 'floatingEnabled', 'backgroundDuringChat']) out[key] = typeof out[key] === 'boolean' ? out[key] : DEFAULTS[key];
-    for (const key of ['customUrl', 'customModel', 'secretId', 'vectorModel', 'vectorUrl']) out[key] = String(out[key] ?? '').trim();
+    for (const key of ['enabled', 'auto', 'floatingEnabled', 'backgroundDuringChat', 'mvuEnabled']) out[key] = typeof out[key] === 'boolean' ? out[key] : DEFAULTS[key];
+    for (const key of ['customUrl', 'customModel', 'secretId', 'vectorModel', 'vectorUrl', 'mvuTimePath', 'mvuLocationPath']) out[key] = String(out[key] ?? '').trim();
     for (const [key, values] of Object.entries({ apiMode: ['main', 'custom'], recallMode: ['keyword', 'semantic'], vectorSource: ['transformers', 'openai', 'siliconflow', 'ollama'], siliconflowEndpoint: ['cn', 'com'] })) {
         if (!values.includes(out[key])) out[key] = DEFAULTS[key];
     }
@@ -87,7 +88,7 @@ export function reconcileState(state, records, owner) {
         if (i >= firstInvalid) break;
         if (!validateSegment(segment) || segment.spans.some(s => {
             const r = byIndex.get(s.index);
-            const bad = !r || s.rawHash !== r.rawHash || s.cleanHash !== r.cleanHash || s.to > r.text.length || s.from !== (offsets.get(s.index) ?? 0);
+            const bad = !r || s.rawHash !== r.rawHash || s.cleanHash !== r.cleanHash || (s.stateHash ?? '') !== (r.stateHash ?? '') || s.to > r.text.length || s.from !== (offsets.get(s.index) ?? 0);
             if (!bad) offsets.set(s.index, s.to);
             return bad;
         })) { firstInvalid = i; break; }
@@ -105,7 +106,7 @@ export function consumedOffsets(segments) {
 
 export function coveredIndices(segments, records) {
     const offsets = consumedOffsets(segments);
-    return new Set(records.filter(r => r.text.length === 0 || (offsets.get(r.index) ?? 0) >= r.text.length).map(r => r.index));
+    return new Set(records.filter(r => (r.text.length === 0 && !r.mvu) || (offsets.has(r.index) && offsets.get(r.index) >= r.text.length)).map(r => r.index));
 }
 
 export function buildRounds(records) {
@@ -144,7 +145,7 @@ export async function pendingWork(rounds, window, segments, count) {
     let tokens = 0;
     for (const round of rounds.slice(0, window.start)) {
         if (round.records.some(r => r.protected)) continue;
-        const records = round.records.filter(r => !r.protected && r.text.length > (offsets.get(r.index) ?? 0));
+        const records = round.records.filter(r => !r.protected && (r.text.length > (offsets.get(r.index) ?? 0) || (r.mvu && !offsets.has(r.index))));
         if (!records.length || !round.complete) continue;
         const parts = records.map(r => ({ ...r, from: offsets.get(r.index) ?? 0 }));
         const cost = await count(parts.map(r => r.text.slice(r.from)).join('\n'));
@@ -157,7 +158,7 @@ export async function pendingWork(rounds, window, segments, count) {
 export const shouldSummarize = (work, settings, force = false) => work.roundCount > 0 &&
     (force || work.tokens >= settings.triggerTokens || work.roundCount >= settings.triggerRounds);
 
-export const formatSpan = (r, from, to) => `[楼层 ${r.index + 1} | ${r.isUser ? '用户' : '角色'} ${r.name}]\n${r.text.slice(from, to)}`;
+export const formatSpan = (r, from, to) => `[楼层 ${r.index + 1} | ${r.isUser ? '用户' : '角色'} ${r.name}]\n${r.text.slice(from, to)}${mvuEvidence(r)}`;
 
 export async function prefixWithin(text, budget, count) {
     if (budget <= 0) return '';
@@ -181,7 +182,7 @@ export async function planBatch(work, settings, maxTokens, count) {
         const whole = round.records.map(r => formatSpan(r, r.from, r.text.length));
         const prospective = [...pieces, ...whole].join('\n\n');
         if (await count(prospective) <= cap) {
-            for (const r of round.records) spans.push({ index: r.index, from: r.from, to: r.text.length, rawHash: r.rawHash, cleanHash: r.cleanHash });
+            for (const r of round.records) spans.push({ index: r.index, from: r.from, to: r.text.length, rawHash: r.rawHash, cleanHash: r.cleanHash, ...(r.stateHash ? { stateHash: r.stateHash, mvu: structuredClone(r.mvu) } : {}) });
             pieces.push(...whole);
             if (await count(pieces.join('\n\n')) >= target) break;
             continue;
@@ -192,7 +193,7 @@ export async function planBatch(work, settings, maxTokens, count) {
             const room = cap - await count([...pieces, formatSpan(r, r.from, r.from)].join('\n\n')) - 16;
             const part = await prefixWithin(r.text.slice(r.from), room, count);
             if (!part) break;
-            spans.push({ index: r.index, from: r.from, to: r.from + part.length, rawHash: r.rawHash, cleanHash: r.cleanHash });
+            spans.push({ index: r.index, from: r.from, to: r.from + part.length, rawHash: r.rawHash, cleanHash: r.cleanHash, ...(r.stateHash ? { stateHash: r.stateHash, mvu: structuredClone(r.mvu) } : {}) });
             pieces.push(formatSpan(r, r.from, r.from + part.length));
             if (r.from + part.length < r.text.length) break;
         }

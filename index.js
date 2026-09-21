@@ -34,6 +34,18 @@ export async function initialize() {
         for (const name of ['MAIN_API_CHANGED', 'OAI_PRESET_CHANGED_AFTER', 'PRESET_CHANGED', 'CHATCOMPLETION_MODEL_CHANGED', 'CHATCOMPLETION_SOURCE_CHANGED', 'CONNECTION_PROFILE_LOADED']) {
             on(e[name], () => { engine.changed(); ui.syncControls(); });
         }
+        let mvuRevision = '', mvuSettling = false;
+        const mvuTimer = setInterval(() => {
+            if (!host.settings().enabled || !host.settings().mvuEnabled || host.isGenerating()) return;
+            const revision = host.mvuRevision();
+            if (revision !== mvuRevision) {
+                mvuRevision = revision; mvuSettling = true;
+                engine.changed();
+            } else if (mvuSettling) {
+                mvuSettling = false; engine.scheduleRefresh(); engine.schedule();
+            }
+        }, 1500);
+        disposers.push(() => clearInterval(mvuTimer));
         on(e.CHAT_COMPLETION_PROMPT_READY, data => engine.observePrompt(data, 'chat'));
         on(e.GENERATE_AFTER_COMBINE_PROMPTS, data => engine.observePrompt(data, 'text'));
         // An API-side hook is kept available even when the extension's own setting is off.

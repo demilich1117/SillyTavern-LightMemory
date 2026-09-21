@@ -1,3 +1,4 @@
+import { selectedMvu, createMvuObserver } from './mvu.js';
 import { MODULE, fingerprint, checkedTokens, normalizeSettings, DEFAULTS } from './core.js';
 import { summaryResponseText } from './network.js';
 
@@ -10,6 +11,7 @@ export async function createHost() {
     const context = () => globalThis.SillyTavern.getContext();
     const tokenCache = new Map();
     let tokenizerKey = '';
+    const observeMvu = createMvuObserver();
     let lastOverhead = null;
     let overheadIdentity = '';
 
@@ -20,7 +22,7 @@ export async function createHost() {
     }
 
     function sourceSignature(ctx = context()) {
-        return fingerprint(ctx.chat.map(m => [m.is_user, m.is_system, m.name, m.mes, m.swipe_id, m.extra?.reasoning, m.extra?.tool_invocations, m.extra?.media, m.extra?.file]));
+        return fingerprint(ctx.chat.map(m => [m.is_user, m.is_system, m.name, m.mes, m.swipe_id, m.extra?.reasoning, m.extra?.tool_invocations, m.extra?.media, m.extra?.file, selectedMvu(m, settings())]));
     }
 
     function tokenizerIdentity(ctx = context()) {
@@ -62,7 +64,7 @@ export async function createHost() {
     function rulesIdentity() {
         const ctx = context();
         return fingerprint([regex.getRegexScripts({ allowedOnly: true }), ctx.powerUserSettings?.reasoning,
-            ctx.extensionSettings.disabledExtensions?.includes('regex'), ctx.characterId, ctx.name1, ctx.name2]);
+            ctx.extensionSettings.disabledExtensions?.includes('regex'), ctx.characterId, ctx.name1, ctx.name2, settings().mvuEnabled, settings().mvuTimePath, settings().mvuLocationPath]);
     }
 
     async function capture(coreChat = null, type = 'normal') {
@@ -99,9 +101,12 @@ export async function createHost() {
             const text = reasoning.removeReasoningFromString(regex.getRegexedString(String(message.mes ?? ''), placement, { isPrompt: true, depth }));
             const promptItem = coreByIndex.get(hostIndex);
             const compatible = !promptItem || (Boolean(promptItem.is_user) === Boolean(message.is_user) && promptItem.name === message.name);
-            const protectedMessage = Boolean(message.is_system || message.extra?.file || message.extra?.media?.length || message.extra?.tool_invocations?.length || !compatible);
+            const mvu = selectedMvu(message, settings());
+            const stateHash = mvu ? fingerprint(mvu) : '';
+            const mvuReady = !mvu || observeMvu(JSON.stringify([owner, index, message.swipe_id ?? 0]), fingerprint([message.mes, mvu]));
+            const protectedMessage = Boolean(!mvuReady || mvu?.error || message.is_system || message.extra?.file || message.extra?.media?.length || message.extra?.tool_invocations?.length || !compatible);
             records.push({ index, hostIndex, name: String(message.name ?? (message.is_user ? ctx.name1 : ctx.name2)), isUser: Boolean(message.is_user),
-                text, rawHash: fingerprint([message.is_user, message.name, message.mes, message.swipe_id]), cleanHash: fingerprint(text),
+                text, mvu, mvuReady, stateHash, rawHash: fingerprint([message.is_user, message.name, message.mes, message.swipe_id]), cleanHash: fingerprint(text),
                 promptTokens: await count(String(promptItem?.mes ?? promptText.get(hostIndex) ?? '')) + 4, protected: protectedMessage });
         }
         const character = ctx.characters?.[ctx.characterId];
@@ -232,7 +237,7 @@ export async function createHost() {
     }
 
     return { context, identity, capture, assertSnapshot, count, tokenizerIdentity, settings, saveSettings, persist, remoteState, post, inject,
-        availableHistory, observePrompt, prepareApi, secretOptions,
+        availableHistory, observePrompt, prepareApi, secretOptions, mvuRevision: () => fingerprint([identity(), context().chat.map((m, i) => { const value = selectedMvu(m, settings()); if (value) observeMvu(JSON.stringify([identity(), i, m.swipe_id ?? 0]), fingerprint([m.mes, value])); return value; })]),
         maxPromptTokens: () => script.getMaxPromptTokens(), isGenerating: () => script.isGenerating(),
         defaults: () => structuredClone(DEFAULTS), events: context().eventTypes };
 }

@@ -1,0 +1,40 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { selectedMvu, createMvuObserver } from '../src/mvu.js';
+import { DEFAULTS, normalizeSettings, fingerprint, emptyState, buildRounds, pendingWork, planBatch, parseSummary, reconcileState, compressionPlan } from '../src/core.js';
+const settings = { ...DEFAULTS, mvuEnabled: true, mvuTimePath: '/世界/时间', mvuLocationPath: '/世界/地点' };
+const message = { swipe_id: 1, variables: [{ stat_data: { 世界: { 时间: '昨日', 地点: '旧城' } } }, { stat_data: { 世界: { 时间: '清晨', 地点: '东院', 隐藏: '不采集' } } }] };
+test('MVU reads only selected swipe and explicit scalar paths, no latest fallback', () => {
+    assert.deepEqual(selectedMvu(message, settings).values, { 时间: '清晨', 地点: '东院' });
+    assert.equal(selectedMvu(message, DEFAULTS), null);
+    assert.equal(selectedMvu({ ...message, is_user: true }, settings), null);
+    assert.ok(selectedMvu({ ...message, swipe_id: 2 }, settings).error);
+    assert.ok(selectedMvu(message, { ...settings, mvuTimePath: '/世界' }).error);
+    assert.ok(selectedMvu(message, { ...settings, mvuTimePath: '/__proto__/x' }).error);
+    assert.ok(selectedMvu(message, { ...settings, mvuTimePath: '/bad~2' }).error);
+    assert.equal(normalizeSettings(settings).mvuTimePath, settings.mvuTimePath);
+});
+test('MVU stable observer isolates chats/swipes and restarts on changes', () => {
+    const observe = createMvuObserver();
+    assert.equal(observe('A:0:1', 'old', 0), false);
+    assert.equal(observe('A:0:1', 'old', 1500), true);
+    assert.equal(observe('B:0:1', 'old', 1500), false);
+    assert.equal(observe('A:0:1', 'new', 1600), false);
+    assert.equal(observe('A:0:1', 'new', 3100), true);
+});
+test('state-only messages are summarized before compression, charged to batch budget and invalidated on edit', async () => {
+    const mvu = selectedMvu(message, settings);
+    const record = { index: 0, text: '', name: '角色', isUser: false, protected: false, promptTokens: 4, mvu, stateHash: fingerprint(mvu), rawHash: 'patch', cleanHash: fingerprint('') };
+    const rounds = buildRounds([record]), state = emptyState('A'), window = { start: 1 };
+    assert.equal(compressionPlan(rounds, window, state, [record]).removed.size, 0);
+    const work = await pendingWork(rounds, window, [], async s => s.length);
+    const batch = await planBatch(work, settings, 1000, async s => s.length);
+    assert.match(batch.text, /MVU 楼层结束状态/); assert.match(batch.text, /清晨/); assert.ok(!batch.text.includes('不采集'));
+    assert.equal(batch.tokens, batch.text.length); assert.equal(batch.spans[0].stateHash, record.stateHash);
+    const segment = parseSummary(JSON.stringify({ summary: '楼层结束时在东院。', overview: '历史记录', memories: [] }), batch);
+    state.segments = [segment];
+    assert.equal(compressionPlan(rounds, window, state, [record]).removed.size, 1);
+    assert.equal((await pendingWork(rounds, window, state.segments, async s => s.length)).roundCount, 0);
+    assert.equal(reconcileState(state, [{ ...record, stateHash: 'changed' }], 'A').invalidated, 1);
+    assert.equal(compressionPlan(buildRounds([{ ...record, protected: true }]), window, state, [record]).removed.size, 0);
+});

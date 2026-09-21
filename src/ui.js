@@ -1,3 +1,4 @@
+import { mvuEvidence } from './mvu.js';
 import { MODULE, DEFAULTS, normalizeSettings, segmentText } from './core.js';
 import { mountFloatingPanel } from './floating.js';
 import { replayLedger, formatLedger } from './ledger.js';
@@ -131,6 +132,17 @@ export function mountUI(host, engine) {
     button('刷新密钥列表', refreshSecrets, custom);
     button('测试摘要连接', async () => { engine.emit({ message: '正在使用简短测试文本检查摘要 API…', error: '' }); engine.emit({ message: await engine.testApi() }); }, api);
 
+    const mvuPanel = section('MVU 时间与地点');
+    check('mvuEnabled', '采集逐楼 MVU 状态', mvuPanel);
+    textField('mvuTimePath', '时间字段路径', '相对 stat_data 的 JSON Pointer；例如 /世界/时间。留空不采集。', mvuPanel, '/世界/时间');
+    textField('mvuLocationPath', '地点字段路径', '例如 /世界/地点。只接受简单值，不采集整个对象。当前为全局设置，换角色卡后请检查路径。', mvuPanel, '/世界/地点');
+    mvuPanel.append(el('p', { class: 'lm-help' }, '读取当前 swipe 已保存的楼层状态，不执行 JSON PATCH，不回填旧楼层。缺失字段的回合保留原文。开启或改变路径会使来源变化的旧记忆重新整理；建议先导出。'));
+    button('预览 MVU 采集', async () => {
+        const snapshot = await host.capture();
+        const rows = snapshot.records.filter(r => !r.isUser);
+        await showText('逐楼 MVU 采集预览', rows.map(r => '第 ' + (r.index + 1) + ' 楼：' + (r.mvu ? r.mvu.error || JSON.stringify(r.mvu.values) : '未启用') + (r.mvu ? '\n路径：' + JSON.stringify(r.mvu.paths) : '')).join('\n\n') || '没有可预览的角色回复。');
+    }, mvuPanel);
+
     const retrieval = section('记忆召回');
     select('recallMode', '召回方式', [['keyword', '本地关键词'], ['semantic', '语义向量 + 关键词']], '语义服务超时会退回本地检索，继续正常回复。', retrieval);
     const semantic = el('div'); retrieval.append(semantic);
@@ -177,7 +189,7 @@ export function mountUI(host, engine) {
         if (await confirm('这会清除轻忆生成的记忆及手动修改，再从清理后的正文整理。聊天原文不变；建议先导出记忆。')) await engine.rebuild();
     }, backups);
 
-    content.append(el('p', { class: 'lm-footer' }, '轻忆 0.3.1 · 原文保留，记忆可追溯'));
+    content.append(el('p', { class: 'lm-footer' }, '轻忆 0.4.0 · 原文保留，记忆可追溯'));
 
     async function confirm(text) {
         const ctx = host.context();
@@ -192,7 +204,7 @@ export function mountUI(host, engine) {
     async function showSources(indices = null) {
         const snapshot = await host.capture();
         const records = indices ? snapshot.records.filter(r => indices.includes(r.index)) : snapshot.records;
-        return showText('实际采集正文', records.map(r => `第 ${r.index + 1} 楼 · ${r.name}${r.protected ? '（含附件或工具数据，保护不压缩）' : ''}\n${r.text || '（清理后为空）'}`).join('\n\n────────\n\n'));
+        return showText('实际采集正文', records.map(r => `第 ${r.index + 1} 楼 · ${r.name}${r.protected ? '（含附件或工具数据，保护不压缩）' : ''}\n${r.text || '（清理后为空）'}${mvuEvidence(r)}${r.mvu?.error ? '\nMVU：' + r.mvu.error : ''}`).join('\n\n────────\n\n'));
     }
     async function showMemories() {
         const view = await engine.inspect();
@@ -212,6 +224,8 @@ export function mountUI(host, engine) {
             item.append(el('summary', {}, `第 ${Math.min(...indices)}–${Math.max(...indices)} 楼${s.pinned ? ' · 固定' : ''}${s.excluded ? ' · 已排除' : ''}`));
             const text = el('textarea', { class: 'text_pole lm-memory-text', value: segmentText(s), rows: 7, 'aria-label': '记忆正文' });
             item.append(text);
+            const snapshots = s.spans.filter(p => p.mvu).map(p => '第 ' + (p.index + 1) + ' 楼 MVU 结束状态：' + JSON.stringify(p.mvu.values) + '\n路径：' + JSON.stringify(p.mvu.paths));
+            if (snapshots.length) item.append(el('pre', { class: 'lm-source' }, snapshots.join('\n\n')));
             const buttons = el('div', { class: 'lm-actions' }); item.append(buttons);
             button('保存修改', async () => { await engine.updateSegment(s.id, { overrideText: text.value }); engine.emit({ message: '记忆修改已保存；该批及后续的概览与结构化状态已停用，重建后恢复。' }); }, buttons);
             const pinned = el('input', { type: 'checkbox', checked: s.pinned });

@@ -114,6 +114,8 @@ export class MemoryEngine {
     publish(data) {
         this.emit({ metrics: data.metrics, snapshot: data.snapshot, state: data.state,
             warning: data.reconciled.invalidated ? `${data.reconciled.invalidated} 批记忆的来源已改变，受影响原文恢复保留。` :
+                data.snapshot.records.some(r => r.mvu && !r.mvuReady) ? '等待逐楼 MVU 状态稳定；对应回合暂时保留原文。' :
+                data.snapshot.records.some(r => r.mvu?.error) ? '部分楼层缺少有效 MVU 快照或字段；对应完整回合保留原文。请检查 MVU 采集预览。' :
                 data.window.conflict ? '上下文空间不足以满足最低回合保护；最终输入仍由酒馆裁剪。' : '' });
     }
 
@@ -254,7 +256,7 @@ export class MemoryEngine {
             const current = new Map(fresh.snapshot.records.map(r => [r.index, r]));
             if (fresh.snapshot.owner !== data.snapshot.owner || !fresh.settings.enabled ||
                 fingerprint(fresh.snapshot.state) !== fingerprint(data.snapshot.state) || fresh.reconciled.changed ||
-                batch.spans.some(span => { const r = current.get(span.index); return !r || r.rawHash !== span.rawHash || r.cleanHash !== span.cleanHash || r.protected; })) {
+                batch.spans.some(span => { const r = current.get(span.index); return !r || r.rawHash !== span.rawHash || r.cleanHash !== span.cleanHash || (r.stateHash ?? '') !== (span.stateHash ?? '') || r.protected; })) {
                 throw new Error('摘要期间来源、清理结果或记忆已改变；本批结果已丢弃，原文继续保留。');
             }
             if (this.host.isGenerating()) throw new DOMException('核对时开始新的角色回复，未保存本批。', 'AbortError');
