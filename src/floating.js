@@ -115,7 +115,7 @@ export function mountFloatingPanel(host, engine, actions) {
         message.textContent = state.message;
         const m = state.metrics;
         [m?.segments, m?.pendingRounds, m?.recentRounds].forEach((v, i) => { values[i].textContent = v === undefined ? '—' : String(v); });
-        error.textContent = state.error || state.warning || ''; error.hidden = !error.textContent;
+        error.textContent = [state.error || state.warning, m ? `待整理 ${m.pendingRounds} 轮：可整理 ${m.readyRounds ?? m.pendingRounds} · 受保护 ${m.blockedRounds ?? 0} · 排队 ${m.queuedRounds ?? 0}${m.openingPending ? '；另有开场白' : ''}` : ''].filter(Boolean).join('\n'); error.hidden = !error.textContent;
         start.disabled = !enabled || !host.identity() || host.isGenerating() || active.has(state.phase);
         pause.disabled = !enabled || !host.identity();
         pause.textContent = host.isGenerating() ? '停止本次' : state.state?.paused ? '恢复整理' : '暂停整理';

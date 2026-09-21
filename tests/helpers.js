@@ -11,7 +11,7 @@ export function recordsFor(roundCount, replyLength = 1420) {
 }
 export function response(batch) {
     return JSON.stringify({ summary: '旅人把银钥匙交给店主保管，约定次日取回。', overview: '旅人仍在寻找遗失的信件。店主保管银钥匙，尚待归还。',
-        memories: [{ kind: '物品', text: '银钥匙由店主保管。', entities: ['银钥匙', '店主', '旅人'], sources: [batch.spans[0].index + 1] }] });
+        memories: [{ kind: '物品', text: '银钥匙由店主保管。', entities: ['银钥匙', '店主', '旅人'], sources: [batch.spans[0].index + (batch.sourceBase ?? 1)] }] });
 }
 export function fakeHost(records = recordsFor(30), overrides = {}) {
     let settings = { ...DEFAULTS, enabled: true, ...overrides };

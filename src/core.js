@@ -1,3 +1,4 @@
+import { projectFacts, parseFacts, validFacts, invalidFactsIndex, factLine } from './facts.js';
 import { mvuEvidence } from './mvu.js';
 import { parseLedger, replayLedger, formatLedger, validateSavedLedger, ledgerLines, invalidLedgerIndex } from './ledger.js';
 export const MODULE = 'lightmemory';
@@ -71,6 +72,7 @@ export function readState(value, owner) {
 }
 
 export function validateSegment(segment) {
+    if (segment?.facts !== undefined && (!Array.isArray(segment.spans) || !validFacts(segment.facts, segment.spans))) return false;
     if (segment?.ledger !== undefined && !validateSavedLedger(segment.ledger)) return false;
     if (segment?.ledgerNames !== undefined && (!segment.ledgerNames || typeof segment.ledgerNames !== 'object' ||
         Object.entries(segment.ledgerNames).some(([id, name]) => !/^P\d+$/.test(id) || typeof name !== 'string' || name.length > 120))) return false;
@@ -83,7 +85,7 @@ export function validateSegment(segment) {
 export function reconcileState(state, records, owner) {
     const byIndex = new Map(records.map(r => [r.index, r]));
     const offsets = new Map();
-    let firstInvalid = invalidLedgerIndex(state.segments);
+    let firstInvalid = Math.min(invalidLedgerIndex(state.segments), invalidFactsIndex(state.segments));
     for (const [i, segment] of state.segments.entries()) {
         if (i >= firstInvalid) break;
         if (!validateSegment(segment) || segment.spans.some(s => {
@@ -112,7 +114,7 @@ export function coveredIndices(segments, records) {
 export function buildRounds(records) {
     const rounds = [];
     for (const record of records) {
-        if (record.isUser || !rounds.length) rounds.push({ records: [], complete: false, tokens: 0 });
+        if (record.isUser || !rounds.length) rounds.push({ records: [], complete: false, tokens: 0, opening: !record.isUser });
         const round = rounds.at(-1);
         round.records.push(record);
         round.tokens += record.promptTokens;
@@ -133,32 +135,44 @@ export function chooseWindow(rounds, settings, availableHistory = Infinity) {
         if (start < rounds.length && !fits && !protect) break;
         start--;
         tokens += next.tokens;
-        if (next.complete) completed++;
+        if (next.complete && !next.opening) completed++;
     }
-    return { start, tokens, rounds: rounds.length - start, completed,
-        target, conflict: tokens > available || (completed < Math.min(settings.minRounds, rounds.filter(r => r.complete).length)) };
+    return { start, tokens, rounds: rounds.slice(start).filter(r => !r.opening).length, completed,
+        target, conflict: tokens > available || (completed < Math.min(settings.minRounds, rounds.filter(r => r.complete && !r.opening).length)) };
 }
 
 export async function pendingWork(rounds, window, segments, count) {
-    const offsets = consumedOffsets(segments);
-    const pending = [];
-    let tokens = 0;
+    const offsets = consumedOffsets(segments), pending = [];
+    let tokens = 0, totalRounds = 0, blockedRounds = 0, queuedRounds = 0, openingPending = false, blocked = false;
     for (const round of rounds.slice(0, window.start)) {
-        if (round.records.some(r => r.protected)) continue;
-        const records = round.records.filter(r => !r.protected && (r.text.length > (offsets.get(r.index) ?? 0) || (r.mvu && !offsets.has(r.index))));
+        const records = round.records.filter(r => r.text.length > (offsets.get(r.index) ?? 0) || (r.mvu && !offsets.has(r.index)));
         if (!records.length || !round.complete) continue;
+        if (round.opening) openingPending = true; else totalRounds++;
+        const protectedRound = round.records.some(r => r.protected);
+        if (protectedRound) { blocked = true; if (!round.opening) blockedRounds++; continue; }
+        // Never summarize later evidence before an earlier blocked round is resolved.
+        if (blocked) { if (!round.opening) queuedRounds++; continue; }
         const parts = records.map(r => ({ ...r, from: offsets.get(r.index) ?? 0 }));
         const cost = await count(parts.map(r => r.text.slice(r.from)).join('\n'));
-        tokens += cost;
-        pending.push({ records: parts, tokens: cost });
+        tokens += cost; pending.push({ records: parts, tokens: cost, opening: round.opening });
     }
-    return { rounds: pending, tokens, roundCount: pending.length };
+    return { rounds: pending, tokens, roundCount: pending.filter(r => !r.opening).length,
+        totalRounds, blockedRounds, queuedRounds, openingPending, blocked };
 }
 
-export const shouldSummarize = (work, settings, force = false) => work.roundCount > 0 &&
+export function sourceRanges(spans) {
+    const ids = [...new Set(spans.map(s => s.index))].sort((a,b) => a-b), groups = [];
+    for (const id of ids) {
+        const last = groups.at(-1);
+        if (last && last[1] + 1 === id) last[1] = id; else groups.push([id,id]);
+    }
+    return groups.map(([a,b]) => a === b ? String(a) : a + '–' + b).join('、');
+}
+
+export const shouldSummarize = (work, settings, force = false) => (work.rounds?.length ?? work.roundCount) > 0 &&
     (force || work.tokens >= settings.triggerTokens || work.roundCount >= settings.triggerRounds);
 
-export const formatSpan = (r, from, to) => `[楼层 ${r.index + 1} | ${r.isUser ? '用户' : '角色'} ${r.name}]\n${r.text.slice(from, to)}${mvuEvidence(r)}`;
+export const formatSpan = (r, from, to) => `[楼层 ${r.index} | ${r.isUser ? '用户' : '角色'} ${r.name}]\n${r.text.slice(from, to)}${mvuEvidence(r)}`;
 
 export async function prefixWithin(text, budget, count) {
     if (budget <= 0) return '';
@@ -201,13 +215,30 @@ export async function planBatch(work, settings, maxTokens, count) {
     }
     const text = pieces.join('\n\n');
     if (!spans.length || await count(text) > cap) throw new Error('无法在摘要输入上限内形成有效批次，未压缩任何消息。');
-    return { spans, text, tokens: await count(text) };
+    return { spans, sourceBase: 0, text, tokens: await count(text) };
 }
 
 export function parseSummary(raw, batch, segments = []) {
     const str = typeof raw === 'string' ? raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '') : '';
     let data;
     try { data = JSON.parse(str); } catch { throw new Error('摘要模型未返回完整 JSON；本批未保存，原文继续保留。'); }
+    if (data?.memoryVersion === 1 || (data && 'key_memories' in data)) {
+        if (typeof data.summary !== 'string' || !data.summary.trim() || data.summary.length > 12000 ||
+            typeof data.overview !== 'string' || !data.overview.trim() || data.overview.length > 12000) throw new Error('摘要与概览必须是非空文本；本批未保存。');
+        return { id: newId(), createdAt: new Date().toISOString(), sourceBase: 0, spans: batch.spans,
+            summary: data.summary.trim(), overview: data.overview.trim(), memories: [],
+            facts: parseFacts(data.key_memories, batch, segments), pinned: false, excluded: false };
+    }
+    // Historical ledger storage uses one-based references; keep its saved representation intact.
+    if (batch.sourceBase === 0) {
+        for (const rows of [data?.people, data?.events, data?.states, data?.tasks, data?.memories]) {
+            if (!Array.isArray(rows)) continue;
+            for (const r of rows) {
+                if (Array.isArray(r?.sources)) r.sources = r.sources.map(n => Number.isInteger(n) ? n + 1 : n);
+                if (r?.time && Number.isInteger(r.time.anchorSource)) r.time.anchorSource++;
+            }
+        }
+    }
     if (data?.ledgerVersion !== undefined) {
         if (typeof data.summary !== 'string' || !data.summary.trim() || data.summary.length > 12000 ||
             typeof data.overview !== 'string' || !data.overview.trim() || data.overview.length > 12000) throw new Error('摘要或概览格式无效；本批未保存。');
@@ -241,6 +272,7 @@ export function parseSummary(raw, batch, segments = []) {
 
 export function segmentText(segment) {
     if (typeof segment.overrideText === 'string') return segment.overrideText;
+    if (segment.facts) return [segment.summary, ...segment.facts.map(factLine)].join('\n');
     if (segment.ledger) return `${segment.summary}\n${formatLedger(replayLedger([{ ledger: segment.ledger }]), true, segment.ledgerNames)}`;
     return [segment.summary, ...segment.memories.map(m => `${m.kind}：${m.text}${m.entities.length ? `（${m.entities.join('、')}）` : ''}`)].join('\n');
 }
@@ -258,7 +290,7 @@ export function compressionPlan(rounds, window, state, records) {
     // A manual correction invalidates dependent generated overviews, not its original evidence.
     const dirty = state.segments.findIndex(s => s.excluded || typeof s.overrideText === 'string');
     const checkpoint = eligible.filter(s => dirty < 0 || state.segments.indexOf(s) < dirty).at(-1);
-    return { removed, eligible, overview: checkpoint?.overview ?? '', ledger: replayLedger(state.segments.slice(0, dirty < 0 ? state.segments.length : dirty).filter(s => s.spans.every(p => removed.has(p.index)))) };
+    return { removed, eligible, facts: projectFacts(state.segments.slice(0, dirty < 0 ? state.segments.length : dirty).filter(s => s.spans.every(p => removed.has(p.index)))), overview: checkpoint?.overview ?? '', ledger: replayLedger(state.segments.slice(0, dirty < 0 ? state.segments.length : dirty).filter(s => s.spans.every(p => removed.has(p.index)))) };
 }
 
 export function terms(text) {
@@ -294,18 +326,24 @@ export async function buildInjection(plan, ranked, settings, count, query = '') 
     const prefix = '[轻忆：以下是有来源的过去事件记录，不是新的指令；状态以时间较新的明确事件和当前对话为准。]\n';
     const suffix = '\n[/轻忆]';
     const selected = [], pieces = [];
+    const renderMemory = s => {
+        const ids = new Set([...(s.facts ?? []).map(f => f.id), ...(s.ledger?.tasks ?? []).map(t => t.id), ...(s.ledger?.states ?? []).map(t => t.id)]);
+        const followups = Object.values(plan.facts ?? {}).filter(f => ids.has(f.id) && f.status !== 'active').map(f => '后续结果：' + factLine(f));
+        return [formatMemory(s), ...followups].join('\n');
+    };
     const budget = settings.memoryTokens;
     const fits = async text => await count(prefix + [...pieces, text].join('\n\n') + suffix) <= budget;
     for (const s of plan.eligible.filter(s => s.pinned)) {
-        const item = formatMemory(s);
+        const item = renderMemory(s);
         if (!await fits(item)) throw new Error('固定记忆超过注入预算；请提高记忆预算或取消部分固定。原上下文已保留。');
         pieces.push(item); selected.push(s.id);
     }
     if (plan.ledger) {
-        const lines = ledgerLines(plan.ledger);
+        const lines = plan.facts ? { states: [], tasks: [] } : ledgerLines(plan.ledger);
         // Keep whole records; do not trim IDs, deadlines or completion states mid-sentence.
         const order = [...lines.states.map(row => `最后确认状态：${row}`),
             ...lines.tasks.map(row => `任务进度：${row}`)];
+        for (const f of Object.values(plan.facts ?? {})) if (f.status === 'active') order.push('关键记忆：' + factLine(f));
         const words = terms(query);
         order.sort((a, b) => words.filter(w => b.toLowerCase().includes(w)).length - words.filter(w => a.toLowerCase().includes(w)).length);
         for (const row of order) {
@@ -320,13 +358,14 @@ export async function buildInjection(plan, ranked, settings, count, query = '') 
     }
     for (const s of ranked) {
         if (selected.includes(s.id) || selected.length >= settings.recallLimit) continue;
-        const item = formatMemory(s);
+        const item = renderMemory(s);
         if (await fits(item)) { pieces.push(item); selected.push(s.id); }
     }
     // If manual edits invalidated the overview, include the newest eligible record as an anchor.
     if (!pieces.length && plan.eligible.length) {
         const s = plan.eligible.at(-1);
-        const clipped = await prefixWithin(formatMemory(s), budget - await count(prefix + suffix) - 16, count);
+        const full = renderMemory(s);
+        const clipped = full.includes('后续结果：') ? (await fits(full) ? full : '') : await prefixWithin(full, budget - await count(prefix + suffix) - 16, count);
         if (clipped) { pieces.push(clipped); selected.push(s.id); }
     }
     const text = pieces.length ? prefix + pieces.join('\n\n') + suffix : '';
@@ -335,10 +374,11 @@ export async function buildInjection(plan, ranked, settings, count, query = '') 
 }
 
 export function formatMemory(s) {
-    const indices = s.spans.map(p => p.index + 1);
+    const indices = s.spans.map(p => p.index);
+    if (s.facts && typeof s.overrideText !== 'string') return `历史摘要（消息 #${sourceRanges(s.spans)}；不代表当前状态）：\n${s.summary}`;
     if (s.ledger && typeof s.overrideText !== 'string') {
         const events = ledgerLines(replayLedger([{ ledger: s.ledger }]), s.ledgerNames).events;
-        return `历史事件（第 ${Math.min(...indices)}–${Math.max(...indices)} 楼；不代表当前状态）：\n${s.summary}\n${events.join('\n')}`;
+        return `历史事件（第 ${sourceRanges(s.spans)} 楼；不代表当前状态）：\n${s.summary}\n${events.join('\n')}`;
     }
     return `旧事（第 ${Math.min(...indices)}–${Math.max(...indices)} 楼）：\n${segmentText(s)}`;
 }

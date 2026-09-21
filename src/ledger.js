@@ -110,8 +110,8 @@ export function ledgerContext(segments) {
 }
 
 const progress = { pending: '未开始', active: '进行中', done: '已完成', cancelled: '已取消', uncertain: '待核实' };
-const sourceText = r => `来源第${r.sources.join('、')}楼`;
-const timeText = r => r.time?.label ? `；时间：${r.time.label}（参照第${r.time.anchorSource}楼）` : '';
+const sourceText = r => `来源第${r.sources.map(n => n - 1).join('、')}楼`;
+const timeText = r => r.time?.label ? `；时间：${r.time.label}（参照第${r.time.anchorSource - 1}楼）` : '';
 export function ledgerLines(ledger, names = {}) {
     const name = id => `${id} ${ledger.people[id]?.name ?? names[id] ?? '身份待核对'}`;
     return {

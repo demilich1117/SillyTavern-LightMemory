@@ -4,7 +4,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "LightMemory contributors",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "homePage": "https://github.com/demilich1117/SillyTavern-LightMemory",
   "minimum_client_version": "1.19.0",
   "generate_interceptor": "lightMemoryInterceptor",

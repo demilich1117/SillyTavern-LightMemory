@@ -1,5 +1,6 @@
+import { projectFacts, factLine } from './facts.js';
 import { mvuEvidence } from './mvu.js';
-import { MODULE, DEFAULTS, normalizeSettings, segmentText } from './core.js';
+import { MODULE, DEFAULTS, normalizeSettings, sourceRanges, segmentText } from './core.js';
 import { mountFloatingPanel } from './floating.js';
 import { replayLedger, formatLedger } from './ledger.js';
 
@@ -140,7 +141,7 @@ export function mountUI(host, engine) {
     button('预览 MVU 采集', async () => {
         const snapshot = await host.capture();
         const rows = snapshot.records.filter(r => !r.isUser);
-        await showText('逐楼 MVU 采集预览', rows.map(r => '第 ' + (r.index + 1) + ' 楼：' + (r.mvu ? r.mvu.error || JSON.stringify(r.mvu.values) : '未启用') + (r.mvu ? '\n路径：' + JSON.stringify(r.mvu.paths) : '')).join('\n\n') || '没有可预览的角色回复。');
+        await showText('逐楼 MVU 采集预览', rows.map(r => '第 ' + r.index + ' 楼：' + (r.mvu ? r.mvu.error || JSON.stringify(r.mvu.values) : '未启用') + (r.mvu ? '\n路径：' + JSON.stringify(r.mvu.paths) : '')).join('\n\n') || '没有可预览的角色回复。');
     }, mvuPanel);
 
     const retrieval = section('记忆召回');
@@ -189,7 +190,7 @@ export function mountUI(host, engine) {
         if (await confirm('这会清除轻忆生成的记忆及手动修改，再从清理后的正文整理。聊天原文不变；建议先导出记忆。')) await engine.rebuild();
     }, backups);
 
-    content.append(el('p', { class: 'lm-footer' }, '轻忆 0.4.0 · 原文保留，记忆可追溯'));
+    content.append(el('p', { class: 'lm-footer' }, '轻忆 0.5.0 · 原文保留，记忆可追溯'));
 
     async function confirm(text) {
         const ctx = host.context();
@@ -204,27 +205,27 @@ export function mountUI(host, engine) {
     async function showSources(indices = null) {
         const snapshot = await host.capture();
         const records = indices ? snapshot.records.filter(r => indices.includes(r.index)) : snapshot.records;
-        return showText('实际采集正文', records.map(r => `第 ${r.index + 1} 楼 · ${r.name}${r.protected ? '（含附件或工具数据，保护不压缩）' : ''}\n${r.text || '（清理后为空）'}${mvuEvidence(r)}${r.mvu?.error ? '\nMVU：' + r.mvu.error : ''}`).join('\n\n────────\n\n'));
+        return showText('实际采集正文', records.map(r => `第 ${r.index} 楼 · ${r.name}${r.protected ? '（等待 MVU 或含受保护数据，暂不压缩）' : ''}\n${r.text || '（清理后为空）'}${mvuEvidence(r)}${r.mvu?.error ? '\nMVU：' + r.mvu.error : ''}`).join('\n\n────────\n\n'));
     }
     async function showMemories() {
         const view = await engine.inspect();
         const body = el('div', { class: 'lightmemory lm-dialog' });
         body.append(el('h3', {}, `记忆档案 · ${view.state.segments.length} 批`));
-        const registry = formatLedger(replayLedger(view.state.segments), false);
+        const registry = Object.values(projectFacts(view.state.segments)).filter(f => f.status === 'active').map(factLine).join('\n');
         if (registry) {
             const panel = el('details', { class: 'lm-memory', open: true });
-            panel.append(el('summary', {}, '人物 ID · 最后确认状态 · 任务进度'), el('pre', { class: 'lm-source' }, registry));
+            panel.append(el('summary', {}, '当前关键记忆'), el('pre', { class: 'lm-source' }, registry));
             body.append(panel);
         }
-        body.append(el('p', { class: 'lm-help' }, '旧版记忆保持原样。新批次由插件分配人物 ID。下方是各批历史记录；自由文本修改会停用该批及后续结构化状态，避免手工文字与旧状态冲突，完整恢复需从正文重建。'));
+        body.append(el('p', { class: 'lm-help' }, '新摘要以自然语言为主，关键条目按需填写。旧版档案保留；所有来源标题使用酒馆消息 ID（从 0 开始），旧摘要正文中的手写楼层不自动改写。自由文本修改会停用依赖它的关键记忆和概览，完整恢复需重建。'));
         if (!view.state.segments.length) body.append(el('p', { class: 'lm-help' }, '尚未整理出记忆。近期窗口外内容达到阈值后会自动开始，也可以点击“整理历史”。'));
         for (const s of [...view.state.segments].reverse()) {
             const item = el('details', { class: 'lm-memory', open: false });
-            const indices = s.spans.map(p => p.index + 1);
-            item.append(el('summary', {}, `第 ${Math.min(...indices)}–${Math.max(...indices)} 楼${s.pinned ? ' · 固定' : ''}${s.excluded ? ' · 已排除' : ''}`));
+            const indices = s.spans.map(p => p.index);
+            item.append(el('summary', {}, `第 ${sourceRanges(s.spans)} 楼${s.pinned ? ' · 固定' : ''}${s.excluded ? ' · 已排除' : ''}`));
             const text = el('textarea', { class: 'text_pole lm-memory-text', value: segmentText(s), rows: 7, 'aria-label': '记忆正文' });
             item.append(text);
-            const snapshots = s.spans.filter(p => p.mvu).map(p => '第 ' + (p.index + 1) + ' 楼 MVU 结束状态：' + JSON.stringify(p.mvu.values) + '\n路径：' + JSON.stringify(p.mvu.paths));
+            const snapshots = s.spans.filter(p => p.mvu).map(p => '第 ' + (p.index) + ' 楼 MVU 结束状态：' + JSON.stringify(p.mvu.values) + '\n路径：' + JSON.stringify(p.mvu.paths));
             if (snapshots.length) item.append(el('pre', { class: 'lm-source' }, snapshots.join('\n\n')));
             const buttons = el('div', { class: 'lm-actions' }); item.append(buttons);
             button('保存修改', async () => { await engine.updateSegment(s.id, { overrideText: text.value }); engine.emit({ message: '记忆修改已保存；该批及后续的概览与结构化状态已停用，重建后恢复。' }); }, buttons);
@@ -275,7 +276,7 @@ export function mountUI(host, engine) {
         metricNodes[0].textContent = m ? String(m.segments) : '—';
         metricNodes[1].textContent = m ? `${m.pendingRounds} 轮` : '—';
         metricNodes[2].textContent = m ? `${m.recentRounds} 轮` : '—';
-        detail.textContent = m ? `近期 ${m.recentTokens.toLocaleString()} / 目标 ${Math.round(m.target).toLocaleString()} tokens · 待整理 ${m.pendingTokens.toLocaleString()}${m.batchMax !== null ? ` · 本批上限 ${m.batchMax.toLocaleString()}` : ''}\n角色卡／世界书等预留为估算，酒馆执行最终上下文限制。` : '原文不会被轻忆删除。';
+        detail.textContent = m ? `待整理 ${m.pendingRounds} 轮：可整理 ${m.readyRounds ?? m.pendingRounds} · 受保护 ${m.blockedRounds ?? 0} · 后续排队 ${m.queuedRounds ?? 0}${m.openingPending ? "；另有开场白" : ""}\n近期 ${m.recentTokens.toLocaleString()} / 目标 ${Math.round(m.target).toLocaleString()} tokens · 可整理正文 ${m.pendingTokens.toLocaleString()}${m.batchMax !== null ? ` · 本批上限 ${m.batchMax.toLocaleString()}` : ''}\n角色卡／世界书等预留为估算，酒馆执行最终上下文限制。` : '原文不会被轻忆删除。';
         const total = Math.max(1, m?.totalRounds ?? 1);
         const pending = m?.pendingRounds ?? 0, latest = m?.recentRounds ?? 0;
         remembered.style.flex = String(Math.max(0, total - pending - latest));
