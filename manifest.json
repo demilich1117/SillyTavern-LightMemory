@@ -1,0 +1,12 @@
+{
+  "display_name": "轻忆 · LightMemory",
+  "loading_order": 90,
+  "js": "index.js",
+  "css": "style.css",
+  "author": "LightMemory contributors",
+  "version": "0.1.0",
+  "homePage": "https://github.com/demilich1117/SillyTavern-LightMemory",
+  "minimum_client_version": "1.19.0",
+  "generate_interceptor": "lightMemoryInterceptor",
+  "hooks": { "disable": "onDisable", "enable": "onEnable" }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "sillytavern-lightmemory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "轻忆 — 可调预算的长会话记忆扩展",
+  "scripts": { "test": "node --test tests/*.test.js", "check": "node scripts/check.mjs" },
+  "engines": { "node": ">=20" }
+}

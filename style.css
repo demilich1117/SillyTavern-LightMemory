@@ -1,0 +1,63 @@
+.lightmemory {
+    --lm-ink: var(--SmartThemeBodyColor, #dedbd4);
+    --lm-paper: var(--SmartThemeBlurTintColor, #242424);
+    --lm-muted: color-mix(in srgb, var(--lm-ink) 64%, transparent);
+    --lm-rule: color-mix(in srgb, var(--lm-ink) 15%, transparent);
+    --lm-accent: var(--SmartThemeQuoteColor, #aaa58e);
+    --lm-field: color-mix(in srgb, var(--lm-paper) 90%, black);
+    color: var(--lm-ink);
+    font: inherit;
+    font-size: 14px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+.lightmemory *, .lightmemory *::before, .lightmemory *::after { box-sizing: border-box; }
+.lightmemory [hidden] { display: none !important; }
+.lightmemory .lm-content { padding: 12px 4px 4px; }
+.lightmemory .lm-status { padding: 12px; border: 1px solid var(--lm-rule); border-radius: 8px; }
+.lightmemory .lm-headline { font-size: 17px; font-weight: 600; letter-spacing: .02em; }
+.lightmemory .lm-message { color: var(--lm-muted); margin: 4px 0 16px; min-height: 21px; }
+.lightmemory .lm-ribbon { display: flex; height: 6px; gap: 3px; margin: 0 0 12px; overflow: hidden; border-radius: 3px; }
+.lightmemory .lm-ribbon > span { min-width: 0; }
+.lightmemory .lm-ribbon-remembered { background: var(--lm-accent); }
+.lightmemory .lm-ribbon-waiting { background: color-mix(in srgb, var(--lm-accent) 45%, var(--lm-paper)); }
+.lightmemory .lm-ribbon-recent { background: color-mix(in srgb, var(--lm-ink) 30%, transparent); }
+.lightmemory .lm-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.lightmemory .lm-metrics strong { display: block; font-size: 20px; font-weight: 600; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.lightmemory .lm-metrics span { display: block; font-size: 12px; color: var(--lm-muted); }
+.lightmemory .lm-help { display: block; font-size: 12px; line-height: 1.5; color: var(--lm-muted); margin: 4px 0 0; white-space: pre-line; }
+.lightmemory .lm-tabular { font-variant-numeric: tabular-nums; }
+.lightmemory .lm-status > .lm-help { margin-top: 12px; }
+.lightmemory .lm-notice { border-left: 2px solid var(--lm-accent); padding-left: 8px; font-size: 13px; white-space: pre-line; margin: 12px 0 0; }
+.lightmemory .lm-error { border-left-color: var(--SmartThemeEmColor, #cc8e86); }
+.lightmemory .lm-switches { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 12px 0 4px; }
+.lightmemory .lm-check { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; cursor: pointer; margin: 0; }
+.lightmemory .lm-check input { margin: 0; accent-color: var(--lm-accent); }
+.lightmemory .lm-section { border-bottom: 1px solid var(--lm-rule); }
+.lightmemory .lm-section > summary { min-height: 44px; padding: 12px 0; font-weight: 600; cursor: pointer; }
+.lightmemory .lm-section-body { padding: 0 0 16px; }
+.lightmemory .lm-field { margin-top: 12px; }
+.lightmemory .lm-field:first-child { margin-top: 4px; }
+.lightmemory .lm-field > label { display: block; font-weight: 500; margin-bottom: 4px; }
+.lightmemory .lm-field > input, .lightmemory .lm-field > select { display: block; width: 100%; min-height: 40px; margin: 0; padding: 8px; background: var(--lm-field); border: 1px solid var(--lm-rule); border-radius: 4px; color: var(--lm-ink); font: inherit; }
+.lightmemory .lm-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 4px; }
+/* ST menu_button uses min-content: keep Chinese labels intact; wrap whole buttons instead. */
+.lightmemory .lm-button { width: auto; min-width: max-content; flex: 0 0 auto; overflow-wrap: normal; word-break: keep-all; display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 8px 12px; border-radius: 4px; font: inherit; color: var(--lm-ink); margin: 8px 4px 0 0; cursor: pointer; white-space: nowrap; }
+.lightmemory .lm-actions .lm-button { margin: 0; }
+.lightmemory .lm-primary { border-color: var(--lm-accent); background: color-mix(in srgb, var(--lm-accent) 16%, var(--lm-paper)); }
+.lightmemory .lm-button:hover { background: color-mix(in srgb, var(--lm-ink) 10%, var(--lm-paper)); }
+.lightmemory .lm-button:active { transform: scale(.98); }
+.lightmemory .lm-button:disabled { cursor: wait; opacity: .5; }
+.lightmemory :is(input, select, textarea, button, summary):focus-visible { outline: 2px solid var(--lm-accent); outline-offset: 2px; }
+.lightmemory .lm-footer { font-size: 11px; color: var(--lm-muted); margin: 16px 0 4px; }
+.lightmemory.lm-dialog { text-align: left; padding: 8px; }
+.lightmemory .lm-source { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.7; max-height: 65vh; overflow: auto; }
+.lightmemory .lm-memory { padding: 12px 0; border-bottom: 1px solid var(--lm-rule); }
+.lightmemory .lm-memory > summary { min-height: 40px; cursor: pointer; font-weight: 600; }
+.lightmemory .lm-memory-text { width: 100%; min-height: 160px; resize: vertical; font: inherit; line-height: 1.6; }
+@media (max-width: 480px) {
+    .lightmemory .lm-status { padding: 12px 8px; }
+    .lightmemory .lm-metrics strong { font-size: 18px; }
+    .lightmemory .lm-actions .lm-button { flex: 1 1 calc(50% - 8px); }
+}
+@media (prefers-reduced-motion: reduce) { .lightmemory .lm-button:active { transform: none; } }
