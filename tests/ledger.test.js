@@ -15,6 +15,39 @@ const proposal = (floor = 1) => ({ ledgerVersion: 1, summary: '旅人获得钥�
 });
 const parse = (data, index = 0, previous = []) => parseSummary(JSON.stringify(data), batch(index), previous);
 const first = () => parse(proposal());
+const multiBatch = () => ({ spans: [0, 2, 4, 6].flatMap(i => batch(i).spans) });
+
+test('additional corroborating sources survive parse, saved replay and export/import', () => {
+    const data = proposal(3);
+    data.states[0].sources = [3, 5];
+    data.tasks[0].sources = [3, 5, 7];
+    const segment = parseSummary(JSON.stringify(data), multiBatch());
+    assert.deepEqual(segment.ledger.events[0].sources, [3]);
+    assert.deepEqual(segment.ledger.states[0].sources, [3, 5]);
+    assert.deepEqual(segment.ledger.tasks[0].sources, [3, 5, 7]);
+    const state = { ...emptyState('A'), segments: [segment] };
+    assert.equal(reconcileState(state, records, 'A').invalidated, 0);
+    assert.deepEqual(importState(safeExport(state), records, 'A').segments, [segment]);
+});
+
+test('disjoint, out-of-batch and inferred supporting events remain invalid', () => {
+    for (const key of ['states', 'tasks']) {
+        const data = proposal(3);
+        data[key][0].sources = [5, 7];
+        assert.throws(() => parseSummary(JSON.stringify(data), multiBatch()), /第1项来源第5、7楼.*new_event_a.*第3楼.*没有共同来源/);
+        data[key][0].sources = [3, 50];
+        assert.throws(() => parseSummary(JSON.stringify(data), multiBatch()), /本批正文/);
+        data[key][0].sources = [3, 5];
+        data.events[0].certainty = 'inferred';
+        assert.throws(() => parseSummary(JSON.stringify(data), multiBatch()), /明确发生/);
+    }
+    const segment = parseSummary(JSON.stringify(proposal(3)), multiBatch());
+    segment.ledger.tasks[0].sources = [5, 7];
+    const state = { ...emptyState('A'), segments: [segment] };
+    assert.equal(reconcileState(state, records, 'A').invalidated, 1);
+    assert.throws(() => importState(safeExport(state), records, 'A'), /不匹配/);
+});
+
 const update = () => ({ ledgerVersion: 1, summary: '旅人已归还钥匙。', overview: '归还约定已完成。', people: [],
     events: [{ ref: 'new_event_b', text: '旅人归还钥匙。', people: ['P001'], certainty: 'explicit', time: { label: '翌日', anchorSource: 1 }, sources: [2] }],
     states: [{ id: 'S001', subject: 'P001', key: '持有物品', value: '已归还银钥匙', event: 'new_event_b', sources: [2] }],

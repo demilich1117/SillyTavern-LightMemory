@@ -68,10 +68,11 @@ export function parseLedger(data, batch, segments = []) {
         const record = { id, text: e.text.trim(), people: people(e.people), time: time(e.time), certainty: e.certainty, sources: sources(e.sources) };
         eventRefs.set(e.ref, id); next.events[id] = record; delta.events.push(record);
     }
-    const evidence = (ref, recordSources) => {
+    const evidence = (ref, recordSources, label) => {
         const event = next.events[eventRefs.get(ref)];
         requireThat(event && event.certainty === 'explicit', '状态或任务更新必须关联本批明确发生的事件');
-        requireThat(recordSources.every(n => event.sources.includes(n)), '更新来源必须属于关联事件'); return event.id;
+        // Later floors may corroborate a state or promise without belonging to its initiating event.
+        requireThat(recordSources.some(n => event.sources.includes(n)), `${label}来源第${recordSources.join('、')}楼与关联事件 ${ref}（第${event.sources.join('、')}楼）没有共同来源`); return event.id;
     };
     const seen = new Set();
     for (const s of data.states) {
@@ -84,7 +85,7 @@ export function parseLedger(data, batch, segments = []) {
         requireThat(!seen.has(slot), '同批对同一状态重复更新'); seen.add(slot);
         requireThat(previous || !Object.values(base.states).some(r => r.subject === subject && r.key === s.key.trim()), '已有状态须按原 ID 更新');
         const id = previous?.id ?? allocate('states', 'S');
-        const record = { id, subject, key: s.key.trim(), value: s.value.trim(), event: evidence(s.event, source), sources: source };
+        const record = { id, subject, key: s.key.trim(), value: s.value.trim(), event: evidence(s.event, source, `状态第${delta.states.length + 1}项`), sources: source };
         next.states[id] = record; delta.states.push(record);
     }
     for (const t of data.tasks) {
@@ -96,7 +97,7 @@ export function parseLedger(data, batch, segments = []) {
         const source = sources(t.sources), participants = people(t.people);
         requireThat(previous || !Object.values(next.tasks).some(r => r.text === t.text.trim() && JSON.stringify(r.people) === JSON.stringify(participants)), '相同任务应沿用原 ID');
         const id = previous?.id ?? allocate('tasks', 'T');
-        const record = { id, text: t.text.trim(), people: participants, status: t.status, time: t.time === undefined && previous ? previous.time : time(t.time), event: evidence(t.event, source), sources: source };
+        const record = { id, text: t.text.trim(), people: participants, status: t.status, time: t.time === undefined && previous ? previous.time : time(t.time), event: evidence(t.event, source, `任务第${delta.tasks.length + 1}项`), sources: source };
         next.tasks[id] = record; delta.tasks.push(record);
     }
     return delta;
@@ -159,14 +160,14 @@ export function invalidLedgerIndex(segments) {
         }
         for (const s of delta.states) {
             const event = localEvents.get(s.event), old = current.states[s.id];
-            if (!current.people[s.subject] || !event || event.certainty !== 'explicit' || s.sources.some(n => !event.sources.includes(n)) ||
+            if (!current.people[s.subject] || !event || event.certainty !== 'explicit' || !s.sources.some(n => event.sources.includes(n)) ||
                 (old && (old.subject !== s.subject || old.key !== s.key)) ||
                 Object.values(current.states).some(r => r.id !== s.id && r.subject === s.subject && r.key === s.key)) return index;
             current.states[s.id] = s;
         }
         for (const t of delta.tasks) {
             const event = localEvents.get(t.event), old = current.tasks[t.id];
-            if (t.people.some(id => !current.people[id]) || !event || event.certainty !== 'explicit' || t.sources.some(n => !event.sources.includes(n)) ||
+            if (t.people.some(id => !current.people[id]) || !event || event.certainty !== 'explicit' || !t.sources.some(n => event.sources.includes(n)) ||
                 (t.time.label && !anchors.has(t.time.anchorSource)) ||
                 (old && ['done', 'cancelled'].includes(old.status) && old.status !== t.status)) return index;
             current.tasks[t.id] = t;
