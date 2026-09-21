@@ -14,7 +14,7 @@ export function response(batch) {
         memories: [{ kind: '物品', text: '银钥匙由店主保管。', entities: ['银钥匙', '店主', '旅人'], sources: [batch.spans[0].index + (batch.sourceBase ?? 1)] }] });
 }
 export function fakeHost(records = recordsFor(30), overrides = {}) {
-    let settings = { ...DEFAULTS, enabled: true, ...overrides };
+    let settings = { ...DEFAULTS, recentTokens: 12000, triggerTokens: 4000, triggerRounds: 8, batchTarget: 4000, batchMax: 6000, enabled: true, ...overrides };
     let local = null, remote = null, owner = 'chat-A', signature = 'unchanged';
     const calls = [], injections = [];
     const host = {

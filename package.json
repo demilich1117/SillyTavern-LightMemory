@@ -1,6 +1,6 @@
 {
   "name": "sillytavern-lightmemory",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "type": "module",
   "description": "轻忆 — 可调预算的长会话记忆扩展",

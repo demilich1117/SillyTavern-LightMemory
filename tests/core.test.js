@@ -1,16 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, normalizeSettings, checkedTokens, emptyState, buildRounds, chooseWindow, pendingWork,
+import { DEFAULTS as CURRENT_DEFAULTS, normalizeSettings, checkedTokens, emptyState, buildRounds, chooseWindow, pendingWork,
     shouldSummarize, planBatch, parseSummary, reconcileState, coveredIndices, compressionPlan, buildInjection,
     rankMemories, prefixWithin, safeExport, importState, fingerprint } from '../src/core.js';
 import { vectorChunks, collectionFor } from '../src/vectors.js';
 import { count, recordsFor, response } from './helpers.js';
 
+// Keep prior budget regression fixtures explicit when product defaults change.
+const DEFAULTS = { ...CURRENT_DEFAULTS, recentTokens: 12000, triggerTokens: 4000, triggerRounds: 8, batchTarget: 4000, batchMax: 6000 };
+
 test('settings preserve unrelated fields, clamp real limits, reject future schemas', () => {
     const input = { unknown: { retained: true }, batchTarget: 9000, batchMax: 3000, recentTokens: NaN };
     const settings = normalizeSettings(input);
     assert.equal(settings.batchTarget, 3000);
-    assert.equal(settings.recentTokens, 12000);
+    assert.equal(settings.recentTokens, 30000);
     settings.unknown.retained = false;
     assert.equal(input.unknown.retained, true);
     assert.throws(() => normalizeSettings({ schemaVersion: 900 }), /更新版本/);
