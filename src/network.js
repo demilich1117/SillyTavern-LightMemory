@@ -1,3 +1,15 @@
+// Keep provider termination metadata until validation; extracted text alone hides truncation.
+export function summaryResponseText(response, extractText, outputLimit) {
+    const reason = response?.choices?.[0]?.finish_reason ?? response?.stop_reason ?? response?.candidates?.[0]?.finishReason;
+    if (['length', 'max_tokens', 'max_output_tokens'].includes(String(reason ?? '').toLowerCase())) {
+        const error = new Error(`摘要输出达到上限而被截断（本次预留 ${outputLimit.toLocaleString()} tokens，部分模型的思考也占此额度）。请在高级设置提高“摘要输出预留”，思考模型可尝试 4,096–8,192，并检查摘要上下文额度。本批未保存，原文继续保留。`);
+        error.name = 'SummaryTruncatedError';
+        throw error;
+    }
+    // Do not fall back to reasoning_content or append thinking to an incomplete answer.
+    return extractText(response);
+}
+
 export async function boundedRequest(operation, { seconds = 60, signal, retries = 0 } = {}) {
     for (let attempt = 0; ; attempt++) {
         const controller = new AbortController();

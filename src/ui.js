@@ -13,7 +13,7 @@ const numericFields = [
     ['batchMax', '单批摘要输入上限', 'tokens', '实际批次还受摘要 API 上下文额度限制。', 256, 100000],
     ['recallLimit', '最多召回条数', '条', '相关记忆按预算择优；固定记忆优先，不静默截断。', 1, 50],
     ['summaryContext', '摘要 API 上下文额度', 'tokens', '指令、概览、输入正文和输出预留的总额度。', 2048, 2000000],
-    ['summaryOutput', '摘要输出预留', 'tokens', '建议 2,048；JSON 被截断时本批不会保存。', 512, 16000],
+    ['summaryOutput', '摘要输出预留', 'tokens', '部分模型的思考也占输出额度。默认 4,096；思考模型可尝试 8,192。实际不超过摘要上下文的一半，截断时本批不保存。', 512, 16000],
     ['requestTimeout', '摘要／索引请求超时', '秒', '取消或超时不会提前省略原文。', 10, 600],
     ['vectorTimeout', '语义召回等待上限', '秒', '达到上限后，本次回复自动使用本地检索。', 1, 60],
     ['vectorChunkTokens', '向量块保守预算', 'tokens', '未知嵌入分词器按 UTF-8 字节上界估算，避免长正文尾部被截断。', 32, 512],
@@ -172,7 +172,7 @@ export function mountUI(host, engine) {
         if (await confirm('这会清除轻忆生成的记忆及手动修改，再从清理后的正文整理。聊天原文不变；建议先导出记忆。')) await engine.rebuild();
     }, backups);
 
-    content.append(el('p', { class: 'lm-footer' }, '轻忆 0.1.0 · 原文保留，记忆可追溯'));
+    content.append(el('p', { class: 'lm-footer' }, '轻忆 0.1.1 · 原文保留，记忆可追溯'));
 
     async function confirm(text) {
         const ctx = host.context();

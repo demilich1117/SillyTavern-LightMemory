@@ -5,7 +5,7 @@ export const DEFAULTS = Object.freeze({
     recentTokens: 12000, minRounds: 4, triggerTokens: 4000, triggerRounds: 8,
     batchTarget: 4000, batchMax: 6000, memoryTokens: 2000, recallLimit: 6,
     apiMode: 'main', customUrl: '', customModel: '', secretId: '',
-    summaryContext: 16384, summaryOutput: 2048, requestTimeout: 90,
+    summaryContext: 16384, summaryOutput: 4096, requestTimeout: 90,
     recallMode: 'keyword', vectorSource: 'transformers', vectorModel: '',
     vectorUrl: '', siliconflowEndpoint: 'cn', vectorTimeout: 5,
     vectorChunkTokens: 256,

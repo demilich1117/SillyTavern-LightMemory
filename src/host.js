@@ -1,4 +1,5 @@
 import { MODULE, fingerprint, checkedTokens, normalizeSettings, DEFAULTS } from './core.js';
+import { summaryResponseText } from './network.js';
 
 export async function createHost() {
     // Version-specific imports are deliberately isolated here.
@@ -184,7 +185,7 @@ export async function createHost() {
         const instruct = structuredClone(ctx.powerUserSettings?.instruct);
         const sourceContext = settings.apiMode === 'main' ? script.getMaxContextTokens() : settings.summaryContext;
         const limit = Math.min(sourceContext, settings.summaryContext);
-        const output = Math.min(settings.summaryOutput, Math.floor(limit / 3));
+        const output = Math.min(settings.summaryOutput, Math.floor(limit / 2));
         const sameTokenizer = settings.apiMode === 'main' || settings.customModel === model;
         // An unrelated custom model has no host tokenizer. UTF-8 byte count is a conservative fallback.
         const apiCount = sameTokenizer ? count : async text => Math.max(await count(text), new TextEncoder().encode(text).length);
@@ -200,23 +201,27 @@ export async function createHost() {
         }
         return { limit, output, count: apiCount, tokenizerEstimated: !sameTokenizer,
             send: async (messages, signal) => {
+                const extract = (response, type) => summaryResponseText(response,
+                    data => ctx.extractMessageFromData(data, type), output);
                 if (settings.apiMode === 'custom') {
-                    return (await ctx.ChatCompletionService.processRequest({ messages, model: settings.customModel, max_tokens: output,
+                    return extract(await ctx.ChatCompletionService.processRequest({ messages, model: settings.customModel, max_tokens: output,
                         chat_completion_source: 'custom', custom_url: settings.customUrl.replace(/\/+$/, ''), secret_id: settings.secretId,
-                        temperature: 0.2, stream: false, custom_prompt_post_processing: 'none' }, {}, true, signal)).content;
+                        temperature: 0.2, stream: false, custom_prompt_post_processing: 'none' }, {}, false, signal), 'openai');
                 }
                 if (mainApi === 'openai') {
                     const data = await openai.createGenerationParameters({ ...cc, openai_max_tokens: output, stream_openai: false, temperature: 0.2 }, model, 'quiet', messages);
-                    const payload = { ...data.generate_data, messages, max_tokens: output, stream: false, n: 1 };
+                    const payload = { ...data.generate_data, messages, stream: false };
+                    // Preserve host model-specific max_completion_tokens/max_tokens selection.
+                    if ('n' in payload) payload.n = 1;
                     delete payload.tools; delete payload.tool_choice;
-                    return (await ctx.ChatCompletionService.sendRequest(payload, true, signal)).content;
+                    return extract(await ctx.ChatCompletionService.sendRequest(payload, false, signal), 'openai');
                 }
                 const prompt = instruct?.enabled ? ctx.TextCompletionService.constructPrompt(structuredClone(messages), instruct, {})
                     : messages.map(m => `${m.role}:\n${m.content}`).join('\n\n') + '\n\nassistant:\n';
                 const payload = ctx.TextCompletionService.createRequestData({ prompt, api_type: tc.type, api_server: apiServer,
                     model: tc.model, max_tokens: output, temperature: 0.2, top_p: tc.top_p ?? 1, min_p: tc.min_p ?? 0,
                     repetition_penalty: tc.rep_pen ?? 1, stream: false, max_context_length: limit, truncation_length: limit });
-                return (await ctx.TextCompletionService.sendRequest(payload, true, signal)).content;
+                return extract(await ctx.TextCompletionService.sendRequest(payload, false, signal), 'textgenerationwebui');
             } };
     }
 
