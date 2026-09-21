@@ -25,8 +25,9 @@ export function parseFacts(input, batch, segments) {
         if (id != null && id !== '' && (typeof id !== 'string' || !Object.hasOwn(existing, id))) fail('更新 ID 不存在');
         if (!id) { let n = 1; do { id = 'F' + String(n++).padStart(3,'0'); } while (reserved.has(id) || Object.hasOwn(existing,id) || used.has(id)); }
         if (used.has(id)) fail('同批重复更新同一条目'); used.add(id);
-        const sources = f.sources ?? allowed;
-        if (!Array.isArray(sources) || !sources.length || sources.some(n => !Number.isInteger(n) || !allowed.includes(n))) fail('来源必须是本批酒馆消息 ID（从 0 开始）');
+        // Provenance is assigned by the plugin, never accepted from model output.
+        const sources = allowed;
+        if (!sources.length) fail('整理批次没有有效消息');
         if (existing[id] && Math.max(...sources) < Math.max(...existing[id].sources)) fail('旧来源不可覆盖较新状态');
         const status = f.status ?? existing[id]?.status ?? 'active';
         if (!['active','resolved','retracted'].includes(status)) fail('状态应为 active、resolved 或 retracted');
@@ -40,7 +41,7 @@ export function validFacts(facts, spans) {
         ['active','resolved','retracted'].includes(f.status) && ['事实','猜测','约定','未决'].includes(f.kind) &&
         Array.isArray(f.sources) && f.sources.length && f.sources.every(n => Number.isInteger(n) && spans.some(p => p.index === n)));
 }
-export function factLine(f) { return f.id + ' [' + f.kind + '·' + ({active:'有效',resolved:'已解决',retracted:'已撤回'}[f.status]) + '] ' + f.text + '（来源消息 #' + f.sources.join('、#') + '）'; }
+export function factLine(f) { return f.id + ' [' + f.kind + '·' + ({active:'有效',resolved:'已解决',retracted:'已撤回'}[f.status]) + '] ' + f.text; }
 
 export function invalidFactsIndex(segments) {
     const last = {};

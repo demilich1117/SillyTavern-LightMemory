@@ -236,7 +236,7 @@ export class MemoryEngine {
             if (!shouldSummarize(data.work, data.settings, force)) break;
             const api = await this.host.prepareApi(data.settings);
             const overview = data.state.segments.at(-1)?.overview ?? '';
-            const registry = JSON.stringify({ key_memories: Object.values(projectFacts(data.state.segments)), people: replayLedger(data.state.segments).people });
+            const registry = JSON.stringify({ key_memories: Object.values(projectFacts(data.state.segments)).map(({ sources, ...fact }) => fact), people: replayLedger(data.state.segments).people });
             const envelope = summaryMessages(overview, '', registry);
             const overhead = await api.count(envelope.map(m => m.content).join('\n')) + 64;
             const effectiveMax = Math.min(data.settings.batchMax, api.limit - api.output - overhead - Math.max(256, Math.ceil(api.limit * 0.08)));

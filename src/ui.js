@@ -190,7 +190,7 @@ export function mountUI(host, engine) {
         if (await confirm('这会清除轻忆生成的记忆及手动修改，再从清理后的正文整理。聊天原文不变；建议先导出记忆。')) await engine.rebuild();
     }, backups);
 
-    content.append(el('p', { class: 'lm-footer' }, '轻忆 0.5.0 · 原文保留，记忆可追溯'));
+    content.append(el('p', { class: 'lm-footer' }, '轻忆 0.5.1 · 原文保留，记忆可追溯'));
 
     async function confirm(text) {
         const ctx = host.context();

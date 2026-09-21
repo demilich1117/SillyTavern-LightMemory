@@ -33,7 +33,7 @@ test('natural summaries accept no facts, strings and optional metadata without e
     const state={...emptyState('A'),segments:[a,b]};
     assert.deepEqual(importState(safeExport(state),records,'A').segments,[a,b]);
     assert.equal(reconcileState(state,[{...records[0],rawHash:'edit'},...records.slice(1)],'A').invalidated,2);
-    assert.throws(()=>parseSummary(data([{text:'错误来源',sources:[99]}]),batch(0)),/消息 ID/);
+    assert.deepEqual(parseSummary(data([{text:'额外来源不采用',sources:[99]}]),batch(0)).facts[0].sources,[0]);
     assert.throws(()=>parseSummary(data([{id:'F999',text:'伪造更新'}]),batch(0)),/ID 不存在/);
 });
 test('resolved key memory exits active injection; matching old recall includes its resolution', async () => {
@@ -51,4 +51,16 @@ test('engine sends simpler prompt and preserves fact IDs across batches', async(
     host.send=messages=>{calls++;if(calls>1){assert.match(messages[1].content,/F001/);host.setSettings({auto:false});}return data(calls===1?['保留约定']:[]);};
     const engine=new MemoryEngine(host,fakeVectors());await engine.run(false);
     assert.equal(engine.status.error,'');assert.ok(host.local.segments[0].facts.length);engine.destroy();
+});
+
+test('model-supplied source fields are ignored; internal batch provenance and clean display survive', async () => {
+    const { factLine } = await import('../src/facts.js');
+    for (const sources of [[99], ['第1楼'], [], null, '0-6', { wrong: true }]) {
+        const segment = parseSummary(data([{ text: '归还钥匙', sources }]), batch(0));
+        assert.deepEqual(segment.facts[0].sources, [0]);
+        assert.ok(!factLine(segment.facts[0]).includes('来源'));
+        const state = {...emptyState('A'),segments:[segment]};
+        assert.deepEqual(importState(safeExport(state),records,'A').segments,[segment]);
+        assert.equal(reconcileState(state,[{...records[0],rawHash:'edited'},...records.slice(1)],'A').invalidated,1);
+    }
 });
