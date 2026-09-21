@@ -2,6 +2,7 @@ import { MODULE, newId, emptyState, readState, reconcileState, buildRounds, choo
     pendingWork, shouldSummarize, planBatch, parseSummary, compressionPlan, rankMemories,
     buildInjection, prefixWithin, fingerprint, safeExport, importState } from './core.js';
 import { boundedRequest, summaryMessages } from './network.js';
+import { ledgerContext, replayLedger } from './ledger.js';
 
 export class MemoryEngine {
     constructor(host, vectors) {
@@ -147,7 +148,10 @@ export class MemoryEngine {
             const clean = data.snapshot.records.filter(r => !r.protected);
             const latestUser = clean.findLast(r => r.isUser)?.text ?? '';
             const contextText = clean.slice(-4).map(r => `${r.name}: ${r.text}`).join('\n');
-            const query = `${latestUser}\n${contextText}`;
+            let query = `${latestUser}\n${contextText}`;
+            for (const person of Object.values(replayLedger(data.state.segments).people)) {
+                if ([person.name, ...person.aliases].some(name => name.length > 1 && query.includes(name))) query += `\n${person.id} ${person.name}`;
+            }
             let vectorIds = [], fallback = '';
             if (data.settings.recallMode === 'semantic' && data.plan.eligible.length) {
                 try {
@@ -156,7 +160,7 @@ export class MemoryEngine {
                 } catch (error) { fallback = '向量服务不可用或超时，本次使用本地检索。'; }
             }
             const ranked = rankMemories(data.plan.eligible, query, vectorIds);
-            const injection = await buildInjection(data.plan, ranked, data.settings, this.host.count);
+            const injection = await buildInjection(data.plan, ranked, data.settings, this.host.count, query);
             this.host.assertSnapshot(data.snapshot);
             if (serial !== this.serial || !this.host.settings().enabled) return;
             // Only filter ST's prompt array. Never edit messages, nested extra objects, or persisted swipes.
@@ -229,18 +233,19 @@ export class MemoryEngine {
             if (!shouldSummarize(data.work, data.settings, force)) break;
             const api = await this.host.prepareApi(data.settings);
             const overview = data.state.segments.at(-1)?.overview ?? '';
-            const envelope = summaryMessages(overview, '');
+            const registry = ledgerContext(data.state.segments);
+            const envelope = summaryMessages(overview, '', registry);
             const overhead = await api.count(envelope.map(m => m.content).join('\n')) + 64;
             const effectiveMax = Math.min(data.settings.batchMax, api.limit - api.output - overhead - Math.max(256, Math.ceil(api.limit * 0.08)));
             const batch = await planBatch(data.work, data.settings, effectiveMax, api.count);
-            const messages = summaryMessages(overview, batch.text);
+            const messages = summaryMessages(overview, batch.text, registry);
             if (await api.count(messages.map(m => m.content).join('\n')) + api.output + 64 > api.limit) throw new Error('摘要请求超出预算；已保留原文。');
             this.host.assertSnapshot(data.snapshot);
             this.emit({ phase: 'summarizing', message: `正在整理第 ${Math.min(...batch.spans.map(s => s.index)) + 1}–${Math.max(...batch.spans.map(s => s.index)) + 1} 楼…`,
                 metrics: { ...data.metrics, batchMax: effectiveMax, batchTokens: batch.tokens, tokenizerEstimated: api.tokenizerEstimated } });
             const raw = await boundedRequest(s => api.send(messages, s), { seconds: data.settings.requestTimeout, retries: 1, signal });
             signal.throwIfAborted();
-            const segment = parseSummary(raw, batch);
+            const segment = parseSummary(raw, batch, data.state.segments);
             await this.waitForIdle(signal);
             const fresh = await this.inspect();
             signal.throwIfAborted();

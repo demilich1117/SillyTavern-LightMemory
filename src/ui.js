@@ -1,5 +1,6 @@
 import { MODULE, DEFAULTS, normalizeSettings, segmentText } from './core.js';
 import { mountFloatingPanel } from './floating.js';
+import { replayLedger, formatLedger } from './ledger.js';
 
 // Design brief: an RP reader glances here between replies. The focal point is the history ribbon:
 // remembered / waiting / recent, followed by a short status sentence. Use ST's paper/ink/muted
@@ -176,7 +177,7 @@ export function mountUI(host, engine) {
         if (await confirm('这会清除轻忆生成的记忆及手动修改，再从清理后的正文整理。聊天原文不变；建议先导出记忆。')) await engine.rebuild();
     }, backups);
 
-    content.append(el('p', { class: 'lm-footer' }, '轻忆 0.2.0 · 原文保留，记忆可追溯'));
+    content.append(el('p', { class: 'lm-footer' }, '轻忆 0.3.0 · 原文保留，记忆可追溯'));
 
     async function confirm(text) {
         const ctx = host.context();
@@ -197,6 +198,13 @@ export function mountUI(host, engine) {
         const view = await engine.inspect();
         const body = el('div', { class: 'lightmemory lm-dialog' });
         body.append(el('h3', {}, `记忆档案 · ${view.state.segments.length} 批`));
+        const registry = formatLedger(replayLedger(view.state.segments), false);
+        if (registry) {
+            const panel = el('details', { class: 'lm-memory', open: true });
+            panel.append(el('summary', {}, '人物 ID · 最后确认状态 · 任务进度'), el('pre', { class: 'lm-source' }, registry));
+            body.append(panel);
+        }
+        body.append(el('p', { class: 'lm-help' }, '旧版记忆保持原样。新批次由插件分配人物 ID。下方是各批历史记录；自由文本修改会停用该批及后续结构化状态，避免手工文字与旧状态冲突，完整恢复需从正文重建。'));
         if (!view.state.segments.length) body.append(el('p', { class: 'lm-help' }, '尚未整理出记忆。近期窗口外内容达到阈值后会自动开始，也可以点击“整理历史”。'));
         for (const s of [...view.state.segments].reverse()) {
             const item = el('details', { class: 'lm-memory', open: false });
@@ -205,7 +213,7 @@ export function mountUI(host, engine) {
             const text = el('textarea', { class: 'text_pole lm-memory-text', value: segmentText(s), rows: 7, 'aria-label': '记忆正文' });
             item.append(text);
             const buttons = el('div', { class: 'lm-actions' }); item.append(buttons);
-            button('保存修改', async () => { await engine.updateSegment(s.id, { overrideText: text.value }); engine.emit({ message: '记忆修改已保存；依赖旧文本的概览已停用。' }); }, buttons);
+            button('保存修改', async () => { await engine.updateSegment(s.id, { overrideText: text.value }); engine.emit({ message: '记忆修改已保存；该批及后续的概览与结构化状态已停用，重建后恢复。' }); }, buttons);
             const pinned = el('input', { type: 'checkbox', checked: s.pinned });
             const pinLabel = el('label', { class: 'lm-check' }); pinLabel.append(pinned, el('span', {}, '固定')); buttons.append(pinLabel);
             pinned.addEventListener('change', () => engine.updateSegment(s.id, { pinned: pinned.checked }).catch(e => engine.fail(e)));
